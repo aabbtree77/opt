@@ -1,0 +1,22 @@
+services:
+  caddy:
+    image: caddy:2.7
+    container_name: caddy
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./data:/data
+      - ./config:/config
+
+    networks:
+      - edge_net
+
+networks:
+  edge_net:
+    name: edge_net
+    external: true

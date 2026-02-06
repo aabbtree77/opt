@@ -1,0 +1,46 @@
+services:
+  app:
+    container_name: initialsdb-app
+    image: initialsdb-prod
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+      - .secrets
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app_net
+      - edge_net
+    restart: unless-stopped
+
+  db:
+    container_name: initialsdb-db
+    image: postgres:16-bookworm
+    env_file:
+      - .env
+      - .secrets
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U initialsdb -d initialsdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: initialsdb_postgres_prod
+
+networks:
+  app_net:
+    name: initialsdb_app_net
+    internal: true
+
+  edge_net:
+    external: true

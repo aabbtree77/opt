@@ -1,0 +1,433 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+
+import { getChallenge, solvePoW } from "@/features/pow/pow";
+
+// ==================================================
+// Types
+// ==================================================
+
+type Mode = "idle" | "search" | "searching" | "posting" | "pow" | "error";
+
+interface Listing {
+  id: number;
+  body: string;
+  created_at: string;
+}
+
+interface SearchResponse {
+  items: Listing[];
+  next_cursor?: string;
+}
+
+// ==================================================
+// API helpers
+// ==================================================
+
+async function searchAPI(
+  q: string,
+  limit: number,
+  cursor: string | null,
+  signal: AbortSignal
+): Promise<SearchResponse> {
+  const params = new URLSearchParams();
+  params.set("q", q);
+  params.set("limit", String(limit));
+  if (cursor) params.set("cursor", cursor);
+
+  const res = await fetch(`/api/listings/search?${params.toString()}`, {
+    signal,
+  });
+
+  if (!res.ok) throw new Error("search failed");
+  return res.json();
+}
+
+async function postAPI(
+  text: string,
+  pow: { challenge: string; nonce: string; token: string },
+  signal: AbortSignal
+): Promise<Listing> {
+  const res = await fetch("/api/listings/create", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-PoW-Challenge": pow.challenge,
+      "X-PoW-Nonce": pow.nonce,
+      "X-PoW-Token": pow.token,
+    },
+    body: JSON.stringify({ text }),
+    signal,
+  });
+
+  if (!res.ok) throw new Error("post failed");
+  return res.json();
+}
+
+// ==================================================
+// Components
+// ==================================================
+
+function Logo(props: { open: boolean; onToggle(): void }) {
+  return (
+    <div className="mt-8 text-center select-none">
+      <pre
+        onClick={props.onToggle}
+        className={[
+          "cursor-pointer font-mono leading-none",
+          "transition-all duration-500 ease-out",
+          props.open
+            ? "opacity-100 scale-100 blur-0"
+            : "opacity-80 scale-[0.98] blur-[0.3px]",
+          "text-[clamp(12px,4.5vw,12px)]",
+        ].join(" ")}
+        style={{
+          color: "#8FD3E8", // pastel cyan-blue
+          textShadow: props.open
+            ? "0 0 12px rgba(143,211,232,0.35)"
+            : "0 0 4px rgba(143,211,232,0.2)",
+        }}
+      >
+        {`
+   i n i t i a l s
+  ─────────────────
+   ██████╗ ██████╗ 
+   ██╔══██╗██╔══██╗
+   ██║  ██║██████╔╝
+   ██║  ██║██╔══██╗
+   ██████╔╝██████╔╝
+   ╚═════╝ ╚═════╝ 
+`}
+      </pre>
+    </div>
+  );
+}
+
+function Rules() {
+  return (
+    <div className="mt-6 max-w-xl text-md text-[#8FD3E8] space-y-3">
+      <ul className="list-disc list-inside space-y-2">
+        <li>
+          This is a public bulletin board, or self help forum. It gives you free
+          visibility on the web, no (archaic registrations, payments, ads).
+        </li>
+        <li>
+          "Selling old military Soviet radio Model XYZ, decent condition, rusty
+          handles and scratched corners, name1@email.com."
+        </li>
+        <li>"Need help deciphering Steven Weinberg's QFT, viberhandle."</li>
+        <li>...</li>
+
+        <li>
+          We do not collect personal data. IPs are hashed to rate-limit bots.
+        </li>
+        <li>
+          Messages are immutable and stay forever. If you need to update
+          anything, post a new message matching some old keywords, state to
+          ignore previous messages.
+        </li>
+        <li>
+          Beware of scammers, ask for multiple credentials with solid bank
+          accounts before buying anything. You are on your own.
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function ControlLine(props: {
+  query: string;
+  disabled: boolean;
+  onQueryChange(q: string): void;
+  onSearch(): void;
+  onPostToggle(): void;
+}) {
+  return (
+    <div className="mt-10 w-full flex justify-center">
+      <div className="flex flex-col md:flex-row items-center gap-3 w-[90vw] md:w-auto">
+        <Input
+          placeholder="Search…"
+          className="md:w-[20vw] w-[90vw] bg-[#2A323C] border-[#9AA1AC] text-[#9AA1AC]"
+          value={props.query}
+          disabled={props.disabled}
+          onChange={(e) => props.onQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") props.onSearch();
+          }}
+        />
+        <Button
+          variant="outline"
+          className="md:w-[5vw] w-[45vw] border-[#9AA1AC] bg-[#2A323C] text-[#9AA1AC]"
+          disabled={props.disabled}
+          onClick={props.onPostToggle}
+        >
+          Post
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SearchResults(props: {
+  items: Listing[];
+  loading: boolean;
+  hasMore: boolean;
+  onLoadMore(): void;
+}) {
+  const loaderRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!loaderRef.current) return;
+
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && props.hasMore && !props.loading) {
+        props.onLoadMore();
+      }
+    });
+
+    obs.observe(loaderRef.current);
+    return () => obs.disconnect();
+  }, [props]);
+
+  return (
+    <div className="mt-8 w-full flex flex-col items-center gap-6">
+      {props.items.map((l) => (
+        <p
+          key={l.id}
+          className="w-[90vw] md:w-[40vw] text-[#9AA1AC] whitespace-pre-wrap"
+        >
+          {l.body}
+        </p>
+      ))}
+      {props.hasMore && <div ref={loaderRef} className="h-10" />}
+    </div>
+  );
+}
+
+function PostForm(props: {
+  onSubmit(text: string): void;
+  disabled: boolean;
+  status: string | null;
+}) {
+  const form = useForm<{ text: string }>({ defaultValues: { text: "" } });
+  const len = useWatch({ control: form.control, name: "text" })?.length ?? 0;
+
+  return (
+    <div className="mt-6 w-[90vw] md:w-[40vw]">
+      <form
+        onSubmit={form.handleSubmit((d) => props.onSubmit(d.text))}
+        className="space-y-2"
+      >
+        <textarea
+          {...form.register("text", { maxLength: 1000 })}
+          className="w-full h-32 bg-[#2A323C] rounded-md p-2 text-[#9AA1AC] border border-[#9AA1AC] focus:outline-none"
+          placeholder="Write your post…"
+          disabled={props.disabled}
+        />
+
+        <div className="relative flex items-center justify-between text-xs text-[#9AA1AC]">
+          <span>{1000 - len} chars left</span>
+
+          {props.status && (
+            <div className="absolute left-1/2 -translate-x-1/2">
+              {props.status}
+            </div>
+          )}
+
+          <Button
+            type="submit"
+            variant="outline"
+            className="border-[#9AA1AC] bg-[#2A323C] text-[#9AA1AC]"
+            disabled={props.disabled || len === 0}
+          >
+            Submit
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ==================================================
+// App
+// ==================================================
+
+export default function App() {
+  const [mode, setMode] = useState<Mode>("idle");
+  const [query, setQuery] = useState("");
+
+  const [items, setItems] = useState<Listing[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+
+  const [powStatus, setPowStatus] = useState<string | null>(null);
+  const [logoOpen, setLogoOpen] = useState(false);
+
+  const searchAbort = useRef<AbortController | null>(null);
+  const postAbort = useRef<AbortController | null>(null);
+
+  const PAGE_SIZE = 30;
+
+  const locked = mode === "searching" || mode === "pow";
+  const isSearching = mode === "searching";
+
+  const startSearch = useCallback(async () => {
+    if (locked) return;
+
+    searchAbort.current?.abort();
+
+    if (!query.trim()) {
+      setItems([]);
+      setCursor(null);
+      setHasMore(false);
+      setMode("idle");
+      return;
+    }
+
+    setLogoOpen(false);
+    searchAbort.current = new AbortController();
+    setMode("searching");
+
+    try {
+      const res = await searchAPI(
+        query,
+        PAGE_SIZE,
+        null,
+        searchAbort.current.signal
+      );
+
+      setItems(res.items);
+      setCursor(res.next_cursor ?? null);
+      setHasMore(Boolean(res.next_cursor));
+      setMode("search");
+    } catch {
+      setMode("error");
+    }
+  }, [query, locked]);
+
+  const loadMore = useCallback(async () => {
+    if (mode !== "search" || !cursor || locked) return;
+
+    searchAbort.current = new AbortController();
+    setMode("searching");
+
+    try {
+      const res = await searchAPI(
+        query,
+        PAGE_SIZE,
+        cursor,
+        searchAbort.current.signal
+      );
+
+      setItems((p) => [...p, ...res.items]);
+      setCursor(res.next_cursor ?? null);
+      setHasMore(Boolean(res.next_cursor));
+      setMode("search");
+    } catch {
+      setMode("error");
+    }
+  }, [mode, cursor, query, locked]);
+
+  const togglePost = () => {
+    if (locked) return;
+
+    searchAbort.current?.abort();
+    setMode("posting");
+    setItems([]);
+    setCursor(null);
+    setHasMore(false);
+  };
+
+  const submitPost = async (text: string) => {
+    if (mode !== "posting") return;
+
+    postAbort.current?.abort();
+    postAbort.current = new AbortController();
+
+    try {
+      setMode("pow");
+      setPowStatus("Requesting challenge…");
+
+      const pow = await getChallenge();
+
+      const nonce = await solvePoW(
+        pow.challenge,
+        pow.difficulty,
+        pow.ttl_secs,
+        (tries, remaining) => {
+          setPowStatus(`Tries ${tries.toLocaleString()} · ${remaining}s left`);
+        }
+      );
+
+      setPowStatus("Submitting…");
+
+      await postAPI(
+        text,
+        {
+          challenge: pow.challenge,
+          nonce,
+          token: pow.token,
+        },
+        postAbort.current.signal
+      );
+
+      setPowStatus(null);
+      setMode("idle");
+    } catch {
+      setPowStatus(null);
+      setMode("error");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#2A323C] flex flex-col items-center">
+      <Logo
+        open={logoOpen}
+        onToggle={() => {
+          setLogoOpen((v) => !v);
+          if (mode === "search") setItems([]);
+        }}
+      />
+
+      <ControlLine
+        query={query}
+        disabled={locked}
+        onQueryChange={setQuery}
+        onSearch={startSearch}
+        onPostToggle={togglePost}
+      />
+
+      {logoOpen && (mode === "idle" || mode === "search") && <Rules />}
+
+      {mode === "searching" && (
+        <div className="mt-4 text-sm text-[#9AA1AC]">search in progress…</div>
+      )}
+
+      {mode === "error" && (
+        <div className="mt-4 text-sm text-red-700">something went wrong</div>
+      )}
+
+      {(mode === "posting" || mode === "pow") && (
+        <>
+          <PostForm
+            onSubmit={submitPost}
+            disabled={mode === "pow"}
+            status={powStatus}
+          />
+          {logoOpen && <Rules />}
+        </>
+      )}
+
+      {mode === "search" && (
+        <SearchResults
+          items={items}
+          loading={isSearching}
+          hasMore={hasMore}
+          onLoadMore={loadMore}
+        />
+      )}
+    </div>
+  );
+}

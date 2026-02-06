@@ -1,0 +1,43 @@
+services:
+  app:
+    container_name: initialsdb-dev-app
+    image: initialsdb-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+      - .secrets
+    depends_on:
+      - db
+    networks:
+      - app_net
+    ports:
+      - "8080:8080" # dev only
+    restart: unless-stopped
+
+  db:
+    container_name: initialsdb-dev-db
+    image: postgres:16-bookworm
+    env_file:
+      - .env
+      - .secrets
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: initialsdb_postgres_dev
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./volumes/postgres
+
+networks:
+  app_net:
+    name: initialsdb_dev_app_net
+    #internal: true

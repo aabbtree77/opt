@@ -1,0 +1,10 @@
+# frontend
+frontend/node_modules
+frontend/dist
+
+# backend
+backend/bin
+
+# editor / OS
+.DS_Store
+

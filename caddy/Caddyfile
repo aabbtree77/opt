@@ -1,0 +1,4 @@
+initials.dev, www.initials.dev {
+    reverse_proxy initialsdb-app:8080
+    encode gzip
+}
