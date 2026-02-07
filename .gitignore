@@ -48,3 +48,5 @@ config/
 .DS_Store
 .idea/
 .vscode/
+
+.ssh/config

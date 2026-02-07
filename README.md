@@ -22,9 +22,11 @@ The big picture:
 
 - React is minimal and standard (vite + React, no router), it adds accessibility/EU compliance via shadcn/ui and Radix UI.
 
-- Postgres is not as slick as SQLite, but 10x more users out of the box, and ready to shard with plugins.
+- Postgres is not as slick as SQLite, but 10x more supported users out of the box, and ready to shard with plugins.
 
-This is a 12-factor app in the sense of dev and prod being mildly isomorphic and there is a bit of extra-robustness against possible shenanigans with environment variables and variable expansions inside docker-compose.yml. Postgres DNS is assembled in Go for this very reason.
+This is a "12-factor app" in the sense of dev and prod being mildly isomorphic and there is a bit of extra-robustness against possible shenanigans with environment variables and variable expansions inside docker-compose.yml. Postgres DNS is assembled in Go for this very reason.
+
+I have tried to keep this flat and simple, but Postgres and Docker Compose are simple only in the perfect world. We lose a single binary ideal, we add magic. This is a serious trade-off to think about before getting into these waters.
 
 ## 1. VPS Setup (Hetzner)
 
@@ -223,10 +225,78 @@ Use them only if you explicitly want to destroy all data and start everything fr
 
 For normal updates, use `make down` and `make up`, cd into folders and check what is doable with Makefile.
 
-## 6. Extras (TBC)
+## 6. Adding a New Application
 
-1. How to add another app (cp, grep, sed, no interpolation inside docker-compose.yml).
+On dev:
 
-2. How to update Postgres password without nuking data.
+```bash
+cd ~/opt
+make clone-app SRC=initialsdb DST=yournewapp
+```
 
-3. How to nuke the whole VPS (all the containers and data).
+It will do these:
+
+- copy `initialsdb` while skipping mounts, binaries, .git, .secrets, but not .secrets.example.
+- search and replace every occurrence of `initialsdb` with `yournewapp`.
+
+This looks archaic, but it is simple and reliable.
+
+Avoid variable interpolation, nonlocal ../ environments, aliases inside docker-compose.yml.
+
+## 7. Adding an Extra (Backup) SSH Key
+
+Just in case, for extra safety, esp. if the dev machine gets ever busted, generate a backup ssh key, add it for use, and also stash it somewhere on non-dev.
+
+All this is very optional, and a bit of a hassle, but it might be useful to know how to deal with multiple SSH keys.
+Otherwise, one can also simply stash the main key. Hetzner also provides the VPS recovery with the account credentials.
+
+On dev:
+
+```bash
+ssh-keygen -t ed25519 -a 100 \
+  -f ~/.ssh/id_ed25519_vps_backup \
+  -C "deploy@vps-backup"
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519_vps_backup
+ssh-copy-id -f -i ~/.ssh/id_ed25519_vps_backup.pub deploy@vps
+```
+
+See my .ssh/config.example with the both keys, it is necessary to replace the old ./ssh/config manually.
+
+VPS:
+
+```bash
+cat ~/.ssh/authorized_keys
+```
+
+must show two keys.
+
+On dev:
+
+```bash
+ssh -i ~/.ssh/id_ed25519_vps vps
+ssh -i ~/.ssh/id_ed25519_vps_backup vps
+ssh vps
+```
+
+All three should succeed.
+
+To see the default key in use, login to VPS with -v:
+
+```bash
+ssh -v vps
+```
+
+and look for "Offering public key:".
+
+To set only the specific key to use, such as `d_ed25519_vps_backup`:
+
+```bash
+ssh-add -D          # remove all keys
+ssh-add ~/.ssh/id_ed25519_vps_backup
+ssh vps
+```
+
+## 8. References
+
+[Postgres vs SQLite](https://lobste.rs/s/ts0vtk/sqlite_is_not_toy_database)
