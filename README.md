@@ -161,7 +161,7 @@ cd /opt/initialsdb
 make hard-reset
 ```
 
-To nuke the caddy container and container network edge_net:
+To nuke the Caddy container and the Docker container network edge_net:
 
 ```bash
 cd /opt/caddy
@@ -180,7 +180,7 @@ make copy-backup-script
 make install-backup-cron
 ```
 
-VPS (if never run before):
+VPS (if never run before or after `make net-remove`):
 
 ```bash
 cd /opt/caddy
@@ -246,7 +246,7 @@ docker stop initialsdb-db
 docker rm initialsdb-db
 ```
 
-The data will remain intact. Postgres stores data in `/var/lib/postgresql/data`, Docker mounts this volume into the container `initialsdb-db`. The containers can be stopped, removed, rebuild with new images, the data volume survives.
+The data will remain intact. Postgres stores data in `/var/lib/postgresql/data`, Docker mounts this volume into the container `initialsdb-db`. The containers can be stopped, removed, rebuild with new images, the whole VPS can reboot, the data volume survives.
 
 ## 6. .secrets
 
@@ -346,7 +346,7 @@ ssh-add ~/.ssh/id_ed25519_vps_backup
 ssh vps
 ```
 
-## 9. initialsb
+## 9. initialsdb
 
 An example app is `initialsdb` which is Go with sqlc and net/http (no frameworks). Go also serves the React SPA, which is a Js artifact from vite + React placed in the `web` folder.
 
@@ -425,3 +425,19 @@ cd /opt/initialsdb
 docker exec -it initialsdb-db psql -U initialsdb -d initialsdb -c \
 "SELECT id, created_at, body FROM listings ORDER BY created_at DESC LIMIT 5;"
 ```
+
+## 11. VPS Reboot
+
+It changes nothing, tested! What actually happens on VPS reboot:
+
+- Linux boots.
+
+- systemd starts services.
+
+- Docker daemon starts automatically.
+
+- Docker looks at containers it knows about.
+
+- Containers with a restart policy are handled.
+
+- All the containers have `restart: unless-stopped` policy in their docker-compose.yml files.
