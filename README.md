@@ -2,7 +2,7 @@
 
 **initialsdb** is a public bulletin board (message store) implemented as a Go backend serving a React SPA, together with PostgreSQL and Docker Compose infrastructure. It uses proof of work and rate limiting to fight bots.
 
-This repository includes application code and infrastructure so that one can host more such web apps on the same VPS, not just initialsdb. The included precise working Makefile, Dockerfile, docker-compose.yml files and this readme.md show to replicate the whole system end-to-end.
+This repository includes application code and infrastructure so that one can host more such web apps on the same VPS, not just initialsdb. The included precise working Makefile, Dockerfile, docker-compose.yml files and this readme.md show how to replicate the whole system end-to-end.
 
 The big picture:
 
