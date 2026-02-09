@@ -1,9 +1,7 @@
-version: "3.9"
-
 services:
   app:
-    container_name: initialsdb-app
-    image: initialsdb-prod
+    container_name: initialsdb-dev-app
+    image: initialsdb-dev
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,15 +9,15 @@ services:
       - .env
       - .secrets
     depends_on:
-      db:
-        condition: service_healthy
+      - db
     networks:
       - app_net
-      - edge_net
+    ports:
+      - "8080:8080" # dev only
     restart: unless-stopped
 
   db:
-    container_name: initialsdb-db
+    container_name: initialsdb-dev-db
     image: postgres:16-bookworm
     env_file:
       - .env
@@ -28,21 +26,18 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - app_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U initialsdb -d initialsdb"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
     restart: unless-stopped
 
 volumes:
   postgres_data:
-    name: initialsdb_postgres_prod
+    name: initialsdb_postgres_dev
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./volumes/postgres
 
 networks:
   app_net:
-    name: initialsdb_app_net
-    internal: true
-
-  edge_net:
-    external: true
+    name: initialsdb_dev_app_net
+    #internal: true

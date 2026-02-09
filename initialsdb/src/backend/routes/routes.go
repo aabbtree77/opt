@@ -90,4 +90,19 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	mux.Handle("/", spa.SPAHandler{
 		Dir: "web",
 	})
+
+	// ────────────────────────────────────────
+	// Global counter of listings above search
+	// ────────────────────────────────────────
+
+	mux.Handle("/api/listings/count", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		(&listings.CountHandler{
+			DB: db,
+		}).ServeHTTP(w, r)
+	}))
+
 }

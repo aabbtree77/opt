@@ -79,12 +79,12 @@ async function postAPI(
 }
 
 async function fetchCount(signal?: AbortSignal): Promise<number> {
-    const res = await fetch("/api/listings/count", { signal });
-    if (!res.ok) throw new Error("count failed");
-    const json = await res.json();
-    return json.count as number;
-  }
-  
+  const res = await fetch("/api/listings/count", { signal });
+  if (!res.ok) throw new Error("count failed");
+  const json = await res.json();
+  return json.count as number;
+}
+
 // ==================================================
 // Components
 // ==================================================
@@ -115,7 +115,7 @@ function ControlLine(props: {
   onTogglePost(): void;
 }) {
   return (
-    <div className="mt-40">
+    <div className="mt-6">
       <div
         className="
           flex
@@ -139,14 +139,12 @@ function ControlLine(props: {
             h-16
             w-[90vw]
             md:w-[22vw]
-
             bg-[#2A323C]
             border
             border-[#9AA1AC]
             text-[#9AA1AC]
             rounded-lg
             px-4
-
             !text-xl
             !leading-tight
           "
@@ -160,17 +158,14 @@ function ControlLine(props: {
             h-16
             w-[90vw]
             md:w-[6vw]
-
             !text-xl
             !leading-tight
-
             px-6
             rounded-lg
             border
             border-[#9AA1AC]
             bg-[#2A323C]
             text-[#9AA1AC]
-
             flex
             items-center
             justify-center
@@ -252,10 +247,8 @@ function PostForm(props: {
         />
 
         <div className="grid grid-cols-3 items-center text-xs text-[#9AA1AC]">
-          {/* Left */}
           <span>{remaining} chars left</span>
 
-          {/* Center */}
           <span
             className="text-center transition-opacity"
             style={{ opacity: props.powInfo ? 1 : 0 }}
@@ -263,7 +256,6 @@ function PostForm(props: {
             {props.powInfo ?? "placeholder"}
           </span>
 
-          {/* Right */}
           <div className="justify-self-end">
             <Button
               type="submit"
@@ -296,30 +288,9 @@ function Logo(props: { open: boolean; onToggle(): void }) {
           active:scale-[0.99]
           select-none
         "
-        title="Click to reveal more"
       >
         initialsDB: Immutable Message Board, 2026.
       </pre>
-
-      {/* Reserved space */}
-      <div
-        className="mt-3 text-sm text-[#8FD3E8] max-w-xl mx-auto transition-opacity duration-200"
-        style={{
-          minHeight: "1.5rem",
-          opacity: props.open ? 1 : 0,
-          pointerEvents: props.open ? "auto" : "none",
-        }}
-      >
-        No accounts. No edits. Messages stay forever.{" "}
-        <a
-          className="text-[#9AA1AC] hover:text-[#F5F5F5]"
-          href="https://www.buymeacoffee.com/aabbtree77"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Buy me a coffee…
-        </a>
-      </div>
     </div>
   );
 }
@@ -379,7 +350,6 @@ export default function App() {
 
     searchAbort.current?.abort();
     searchAbort.current = new AbortController();
-
     setState({ tag: "searching" });
 
     try {
@@ -425,11 +395,6 @@ export default function App() {
   const submitPost = async () => {
     if (state.tag !== "posting") return;
 
-    if (postText.length > 255) {
-      pushStatus("Post exceeds 255 characters.", "error");
-      return;
-    }
-
     postAbort.current?.abort();
     postAbort.current = new AbortController();
 
@@ -437,14 +402,12 @@ export default function App() {
       setState({ tag: "pow" });
 
       const pow = await getChallenge();
-
       const nonce = await solvePoW(
         pow.challenge,
         pow.difficulty,
         pow.ttl_secs,
-        (tries, remaining) => {
-          setPowInfo(`${tries.toLocaleString()} tries · ${remaining}s`);
-        }
+        (tries, remaining) =>
+          setPowInfo(`${tries.toLocaleString()} tries · ${remaining}s`)
       );
 
       await postAPI(
@@ -452,8 +415,8 @@ export default function App() {
         { challenge: pow.challenge, nonce, token: pow.token },
         postAbort.current.signal
       );
-      setTotalCount((n) => (n == null ? n : n + 1));
 
+      setTotalCount((n) => (n == null ? n : n + 1));
       setPostText("");
       setPowInfo(null);
       setPostOpen(false);
@@ -469,11 +432,12 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#2A323C] flex flex-col">
       <div className="flex-1 w-[90vw] md:w-[40vw] mx-auto">
-      {totalCount !== null && (
+        {totalCount !== null && (
           <div className="mt-32 text-center text-sm text-[#8FD3E8] tracking-wide">
-            {totalCount.toLocaleString()}
+            {totalCount.toLocaleString()} messages stored
           </div>
         )}
+
         <ControlLine
           query={query}
           disabled={locked}

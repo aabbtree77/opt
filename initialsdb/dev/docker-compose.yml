@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   app:
     container_name: initialsdb-dev-app
@@ -31,13 +33,7 @@ services:
 volumes:
   postgres_data:
     name: initialsdb_postgres_dev
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./volumes/postgres
 
 networks:
   app_net:
     name: initialsdb_dev_app_net
-    #internal: true

@@ -1,6 +1,10 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -e -o pipefail -c
 
+# --------------------------------------------------
+# Docker lifecycle
+# --------------------------------------------------
+
 up:
 	docker compose up -d --build
 
@@ -13,20 +17,39 @@ logs:
 ps:
 	docker compose ps
 
-reset:
-	docker compose down
-	-docker image rm initialsdb-dev		
+# --------------------------------------------------
+# Soft reset: preserve DB
+# --------------------------------------------------
 
-nuke-db:
-	docker compose down
-	docker volume rm initialsdb_postgres_dev || true
-
-
-clean:
-	@echo "🧹 Stopping and removing all containers, images, volumes..."
-	docker compose down --volumes --remove-orphans
-	@echo "🧹 Removing dev image..."
+soft-reset:
+	@echo "🧹 Stopping containers and cleaning images..."
+	docker compose down --remove-orphans
 	-docker image rm initialsdb-dev
-	@echo "🧹 Removing dev postgres volume..."
-	-docker volume rm initialsdb_postgres_dev
-	@echo "✅ Dev environment is clean."
+	@echo "✅ Soft reset done (DB preserved)."
+
+# --------------------------------------------------
+# Hard reset: wipe DB
+# --------------------------------------------------
+
+hard-reset:
+	@echo "🧹 Stopping containers and cleaning images..."
+	docker compose down --remove-orphans
+	-docker image rm initialsdb-dev
+	@echo "💣 Wiping dev database volume..."
+	docker volume rm initialsdb_postgres_dev || true
+	@echo "✅ Hard reset done (DB fully wiped)."
+
+
+# ==================================================
+# Convenience aliases
+# ==================================================
+
+reset: soft-reset
+
+nuke-db: hard-reset
+
+# ==================================================
+# Optional: full rebuild target
+# ==================================================
+# rebuild: hard-reset up
+#	@echo "✅ Production environment rebuilt from scratch."

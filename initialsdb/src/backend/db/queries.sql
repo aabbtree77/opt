@@ -73,3 +73,13 @@ WHERE
 UPDATE listings
 SET ip_hash = ip_hash
 WHERE ip_hash = $1;
+
+
+-- =====================================================
+-- Global counter for DB entries above search
+-- =====================================================
+
+-- name: CountVisibleListings :one
+SELECT COUNT(*)::bigint
+FROM listings
+WHERE is_hidden = FALSE;

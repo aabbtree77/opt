@@ -77,7 +77,6 @@ This compiles and distributes binaries and their assets (Js) to `bin` and `web`,
 
 ```bash
 cd ~/opt/initialsdb/dev
-mkdir -p volumes/postgres
 make up
 ```
 
@@ -95,12 +94,6 @@ This will create and run all the containers on dev:
 
 Go to `http://localhost:8080/`, the app should work now.
 
-If you are done testing and do not care about any Postgres data (!), nuke it all:
-
-```bash
-make clean
-```
-
 To simply stop/restart all the containers (data intact), use
 
 ```bash
@@ -108,18 +101,30 @@ make down
 make up
 ```
 
-This is enough for code updates: make down, rebuild, make up. If Dockerfile changes (rarely):
+This is enough for code updates: make down, rebuild, make up.
+
+If Dockerfile changes (rarely):
 
 ```bash
-make reset
+make soft-reset
+make up
+```
+
+If you are done testing and do not care about any Postgres data (!), nuke it all:
+
+```bash
+make hard-reset
 ```
 
 ## 4. Release (VPS)
 
-prod (VPS):
+prod (VPS) is almost identical to dev, except that prod:
 
 - adds a reverse-proxy (Caddy),
 - must install and run Posgres backup.
+- must be more careful about .secrets (though everything is the same routine).
+
+### 4.1 VPS Preparation
 
 On dev, inside `/prod`, add new passwords to .secrets with
 
@@ -136,7 +141,16 @@ cd /opt/initialsdb
 make down
 ```
 
-This will stop everything app (initialsdb) related, except Caddy, data untouched.
+This will stop containers and also remove them. Intact: images (build time), volumes (DB data), networks (unless orphaned).
+
+If prod Dockerfile got updated, remove the image, but keep the DB volume intact:
+
+VPS:
+
+```bash
+cd /opt/initialsdb
+make soft-reset
+```
 
 To nuke the whole old app running (including data!):
 
@@ -144,8 +158,18 @@ VPS:
 
 ```bash
 cd /opt/initialsdb
-make clean
+make hard-reset
 ```
+
+To nuke the caddy container and container network edge_net:
+
+```bash
+cd /opt/caddy
+make clean
+make net-remove
+```
+
+### 4.2 Actual Deployment
 
 On dev:
 
@@ -188,7 +212,43 @@ This should output:
  ✔ Container initialsdb-app
 ```
 
-## 5. .secrets and Dangerous Commands
+## 5. Dangerous Commands
+
+They are:
+
+```bash
+make hard-reset
+make nuke-db
+docker volume rm initialsdb_postgres_prod
+docker compose down --volumes
+```
+
+Use them only if you explicitly want to destroy all data and start everything from scratch!
+
+For normal updates, use `make down` and `make up`, or `make soft-reset` if the prod Dockerfile is updated.
+
+Also, I do not use binds to regular files outside the containers, but if for some reason one does that (see dev/docker-compose.yml.volume-bind), then removing the bind destroys data, i.e.
+
+```bash
+sudo rm -rf ./volumes/postgres
+```
+
+Initially, I had these binds in dev, but removed them as they turned the data volume (mounted to containers) to some kind of a pointer. Removing a volume would not destroy data, but removing the bind would do that. I did not need any of that.
+
+The Postgres container `initialsdb-db` does not own data, it owns the Postgres process and its file system.
+
+One can make the container gone:
+
+VPS:
+
+```bash
+docker stop initialsdb-db
+docker rm initialsdb-db
+```
+
+The data will remain intact. Postgres stores data in `/var/lib/postgresql/data`, Docker mounts this volume into the container `initialsdb-db`. The containers can be stopped, removed, rebuild with new images, the data volume survives.
+
+## 6. .secrets
 
 Inside .gitignore put these lines:
 
@@ -214,18 +274,7 @@ Rule order matters. Git applies ignores top to bottom:
 
 So now git won't push .secrets, .secrets.local, .secrets.prod should there be any later. It will commit .secrets.example, .secrets.local.example.
 
-Any of these commands irreversibly deletes the database:
-
-```bash
-make nuke-db
-make clean
-```
-
-Use them only if you explicitly want to destroy all data and start everything from scratch.
-
-For normal updates, use `make down` and `make up`, cd into folders and check what is doable with Makefile.
-
-## 6. Adding a New Application
+## 7. Adding a New Application
 
 On dev:
 
@@ -243,7 +292,7 @@ This looks archaic, but it is simple and reliable.
 
 Avoid variable interpolation, nonlocal ../ environments, aliases inside docker-compose.yml.
 
-## 7. Adding an Extra (Backup) SSH Key
+## 8. Adding an Extra (Backup) SSH Key
 
 Just in case, for extra safety, esp. if the dev machine gets ever busted, generate a backup ssh key, add it for use, and also stash it somewhere on non-dev.
 
@@ -297,6 +346,82 @@ ssh-add ~/.ssh/id_ed25519_vps_backup
 ssh vps
 ```
 
-## 8. References
+## 9. initialsb
 
-[Postgres vs SQLite](https://lobste.rs/s/ts0vtk/sqlite_is_not_toy_database)
+An example app is `initialsdb` which is Go with sqlc and net/http (no frameworks). Go also serves the React SPA, which is a Js artifact from vite + React placed in the `web` folder.
+
+Whenever db/queries.sql are updated, say adding the global counter
+
+```sql
+-- name: CountVisibleListings :one
+SELECT COUNT(*)::bigint
+FROM listings
+WHERE is_hidden = FALSE;
+```
+
+one must run
+
+```bash
+~/opt/initialsdb/src/backend
+sqlc generate
+```
+
+which will create the code inside db/queries.sql.go:
+
+```go
+func (q *Queries) CountVisibleListings(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countVisibleListings)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+```
+
+This is the brilliance of the sqlc: it is static generator, ask AI to write SQL queries, save on tokens as the Go code will be generated by the sqlc. No ORMs, no SQL strings inside Go.
+
+## 10. Inspecting DB on the VPS
+
+VPS:
+
+```bash
+cd /opt/initialsdb
+docker exec -it initialsdb-db psql -U initialsdb -d initialsdb
+```
+
+Inside psql (initialsdb=#):
+
+```sql
+-- list tables
+\dt
+
+-- describe the listings table
+\d listings
+
+-- see some rows
+SELECT id, created_at, body, is_hidden
+FROM listings
+ORDER BY created_at DESC
+LIMIT 10;
+
+-- count visible listings
+SELECT COUNT(*) FROM listings WHERE is_hidden = false;
+```
+
+Exit psql with `\q`.
+
+If the DB credentials change, to quickly get the DB name, user, and password:
+
+VPS:
+
+```
+cd /opt/initialsdb
+docker exec -it initialsdb-db env | grep POSTGRES
+```
+
+A quick direct inspection without getting into the psql prompt:
+
+```bash
+cd /opt/initialsdb
+docker exec -it initialsdb-db psql -U initialsdb -d initialsdb -c \
+"SELECT id, created_at, body FROM listings ORDER BY created_at DESC LIMIT 5;"
+```

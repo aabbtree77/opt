@@ -29,6 +29,23 @@ func (q *Queries) CountRecentListingsByIP(ctx context.Context, ipHash []byte) (i
 	return count, err
 }
 
+const countVisibleListings = `-- name: CountVisibleListings :one
+
+SELECT COUNT(*)::bigint
+FROM listings
+WHERE is_hidden = FALSE
+`
+
+// =====================================================
+// Global counter for DB entries above search
+// =====================================================
+func (q *Queries) CountVisibleListings(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countVisibleListings)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createListing = `-- name: CreateListing :one
 
 INSERT INTO listings (
