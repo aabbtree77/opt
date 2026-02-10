@@ -2,7 +2,7 @@
 
 **initialsdb** is a public bulletin board (message store) implemented as a Go backend serving a React SPA, together with PostgreSQL and Docker Compose infrastructure. It uses proof of work and rate limiting to fight bots.
 
-This repository includes application code and infrastructure so that one can host more such web apps on the same VPS, not just initialsdb. The included precise working Makefile, Dockerfile, docker-compose.yml files and this readme.md show how to replicate the whole system end-to-end.
+This repository includes application code and infrastructure so that one can host more such web apps on the same VPS, not just initialsdb. Makefile, Dockerfile, docker-compose.yml files and this readme.md show how to replicate the whole system end-to-end.
 
 The big picture:
 
@@ -22,13 +22,13 @@ The big picture:
 
 - React solves accessibility/EU compliance via shadcn/ui and Radix UI.
 
-- Postgres is more web-ready than SQLite.
+- PostgreSQL is No. 1 DB in the world: [SO, 2025.](https://survey.stackoverflow.co/2025/technology#1-databases)
 
-Each application is fully self-contained using Docker Compose, including its own database, enabling reproducible deployments and strict isolation. Infrastructure services such as TLS termination are shared per host.
+Each application is fully self-contained using Docker Compose, including its own database. Infrastructure services such as TLS termination (Caddy) are shared per host.
 
 This is a "12-factor app" in the sense of dev and prod being mildly isomorphic and there is a bit of extra-robustness against possible shenanigans with environment variables and variable expansions inside docker-compose.yml. Postgres DNS is assembled in Go for this very reason.
 
-I have tried to keep this flat and simple, but Postgres and Docker Compose are simple only in the perfect world. We lose a single binary ideal, we add .yml layers. This is a serious trade-off. Reproducibility and isolation, at the expense of debugging inside a box inside a box...
+It is not entirely clear to me if Docker Compose is necessary or wins over plain Dockerfile + Makefile. This could be a cultural thing at the moment, see Sect. "Why Docker Compose" below.
 
 ## 1. VPS Setup (Hetzner)
 
@@ -444,76 +444,111 @@ It changes nothing, tested! What actually happens on VPS reboot:
 
 - All the containers have `restart: unless-stopped` policy in their docker-compose.yml files.
 
-## 12. Bare Linux vs Docker vs Docker Compose
+## 12. Why Docker Compose?
 
-### 12.1 Classical Postgres on the VPS (systemd), Shared by Multiple Apps
+"Why Docker" is rather clear. I do not want tight coupling to the host with all that /usr/bin vs /usr/local/bin Linux schizophrenia, symlinks, and system files mixing with applications. Reproducible self-documenting environment, more reliable version upgrades. Maybe even isolation of various components into services.
 
-One OS-level Postgres service, managed by systemd. Multiple apps connect via TCP. Apps may or may not be containerized.
+But why Docker Compose instead of just Makefile?
 
-Pros:
+Instead of prod/docker-compose.yml and prod/Makefile we could have one slightly more complicated prod/Makefile:
 
-- Maximum debuggability: psql, logs, configs are first-class citizens.
+```Makefile
+SHELL := /bin/bash
+.SHELLFLAGS := -e -o pipefail -c
 
-- Lower operational complexity.
+APP_NAME := initialsdb
+APP_IMAGE := initialsdb-prod
+APP_CONTAINER := initialsdb-app
+DB_CONTAINER := initialsdb-db
 
-- Lower memory footprint.
+APP_NET := initialsdb_app_net
+EDGE_NET := edge_net
 
-Cons:
+DB_VOLUME := initialsdb_postgres_prod
 
-- Tight coupling to the host.
+ENV_FILES := --env-file .env --env-file .secrets
 
-- Harder to migrate cleanly.
+.PHONY: up down build app db networks volumes clean logs ps
 
-- Version upgrades affect all apps.
+# ---------------------------
+# Top-level lifecycle
+# ---------------------------
 
-- Less isolation (one bad migration hurts more).
+up: networks volumes build db app
+	@echo "✅ initialsdb is up"
 
-Best use case: when you are the DBA. This is the “Unix adult” setup.
+down:
+	docker stop $(APP_CONTAINER) $(DB_CONTAINER) 2>/dev/null || true
+	docker rm $(APP_CONTAINER) $(DB_CONTAINER) 2>/dev/null || true
+	@echo "🛑 Containers stopped and removed"
 
-### 12.2 Dockerized Postgres (Single Container), Multiple Apps
+clean: down
+	docker image rm $(APP_IMAGE) 2>/dev/null || true
+	@echo "🧹 Images cleaned"
 
-Postgres runs in Docker. One DB container. Apps connect over Docker network or localhost.
+logs:
+	docker logs -f $(APP_CONTAINER)
 
-Pros:
+ps:
+	docker ps --filter name=$(APP_NAME)
 
-- Reproducible environment.
+# ---------------------------
+# Infra primitives
+# ---------------------------
 
-- Easy upgrades via image pinning.
+networks:
+	@docker network inspect $(APP_NET) >/dev/null 2>&1 || \
+		docker network create --internal $(APP_NET)
+	@docker network inspect $(EDGE_NET) >/dev/null 2>&1 || \
+		docker network create $(EDGE_NET)
+	@echo "🌐 Networks ready"
 
-- Cleaner host system.
+volumes:
+	@docker volume inspect $(DB_VOLUME) >/dev/null 2>&1 || \
+		docker volume create $(DB_VOLUME)
+	@echo "💾 Volume ready"
 
-- One place to back up.
+# ---------------------------
+# Build & run
+# ---------------------------
 
-Cons:
+build:
+	docker build -t $(APP_IMAGE) .
 
-- Still shared fate between apps.
+db:
+	docker run -d \
+		--name $(DB_CONTAINER) \
+		--restart unless-stopped \
+		$(ENV_FILES) \
+		-v $(DB_VOLUME):/var/lib/postgresql/data \
+		--network $(APP_NET) \
+		postgres:16-bookworm
 
-- Debugging slightly indirect.
+	@echo "⏳ Waiting for Postgres to be ready..."
+	@until docker exec $(DB_CONTAINER) pg_isready -U initialsdb -d initialsdb >/dev/null 2>&1; do sleep 1; done
+	@echo "🐘 Postgres ready"
 
-- Container lifecycle tied to DB uptime.
+app:
+	docker run -d \
+		--name $(APP_CONTAINER) \
+		--restart unless-stopped \
+		$(ENV_FILES) \
+		--network $(APP_NET) \
+		--network $(EDGE_NET) \
+		-p 8080:8080 \
+		$(APP_IMAGE)
+```
 
-- Volume handling must be respected.
+This file stores container, volume, network names, ports, restart-policies, image OSes just like docker-compose.yml, with certain advantages:
 
-Best use case: mixed environments (dev, staging, prod).
+- Imperative command sequence. Every side effect is visible.
 
-### Docker Compose per App (This Setup)
+- Shell-debuggable. You can copy-paste sub-commands and tweak live.
 
-One docker-compose.yml per dev and prod inside app. Each app has: its own Postgres, its own network. One shared Caddy container per VPS.
+- No YAML indentation traps.
 
-Pros:
+- No YAML variable interpolation traps.
 
-- Maximum isolation.
+The last one is incredibly painful at times. Every .env needs to be placed in the same folder as docker-compose.yml, to prevent variable expansion problems such as Postgres passwords as empty strings and goroutines panicking. Environments accessing stuff outside ../ do not work as expected, some variables get expanded, but others do not, name aliases...
 
-- Each app is fully self-contained.
-
-- Easy teardown and rebuild.
-
-- Environment parity (dev ⇄ prod).
-
-Cons:
-
-- Higher resource usage.
-
-- More layers.
-
-Best use case: SaaS prototypes.
+Docker Compose does its job in this code, but it has taken some time to debug. I even had to change my folder layout to make this more robust as initially I was too naïve to cram both dev and prod docker-compose.yml files into the same folder. The files are tiny, but the debugging time is not. Consider removing this layer.
