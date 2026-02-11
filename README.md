@@ -6,6 +6,8 @@ This repository includes application code and infrastructure so that one can hos
 
 The big picture:
 
+- 12-factor inspired.
+
 - Browser → Caddy: HTTPS (443).
 
 - Caddy → app: HTTP over Docker network (external).
@@ -25,8 +27,6 @@ The big picture:
 - PostgreSQL is No. 1: [SO, 2025.](https://survey.stackoverflow.co/2025/technology#1-databases)
 
 Each application is fully self-contained using Docker Compose, including its own database. Infrastructure services such as TLS termination (Caddy) are shared per host.
-
-This is a "12-factor app" in the sense of dev and prod being mildly isomorphic and there is a bit of extra-robustness against possible shenanigans with environment variables and variable expansions inside docker-compose.yml. Postgres DNS is assembled in Go for this very reason.
 
 # Part I: Infrastructure
 
@@ -552,30 +552,57 @@ package listings
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"time"
 
 	"app.root/db"
+	"app.root/guards"
 	"app.root/httpjson"
 )
 
 type CountHandler struct {
-	DB *sql.DB
+	DB     *sql.DB
+	Guards []guards.Guard
 }
 
 func (h *CountHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	if r.Method != http.MethodGet {
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "INVALID_INPUT", "method not allowed")
+		return
+	}
+
+	for _, g := range h.Guards {
+		if !g.Check(r) {
+			httpjson.Forbidden(w, "RATE_LIMITED", "request blocked")
+			return
+		}
+	}
+
+	/*
+		Add timeout to prevent request goroutine block indefinitely
+		if DB stalls or network hiccup for some strange reason:
+
+		query auto-cancels
+
+		DB receives cancel signal
+
+		goroutine freed
+
+		client gets 500
+	*/
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
 	q := db.New(h.DB)
 
 	n, err := q.CountVisibleListings(ctx)
 	if err != nil {
-		http.Error(w, "count failed", http.StatusInternalServerError)
+		httpjson.InternalError(w, "count failed")
 		return
 	}
 
-	httpjson.Write(w, http.StatusOK, map[string]int64{
+	httpjson.WriteOK(w, map[string]int64{
 		"count": n,
 	})
 }
@@ -584,22 +611,23 @@ func (h *CountHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 along with its corresponding setup and call inside routes/routes.go:
 
 ```go
-mux.Handle("/api/listings/count", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	(&listings.CountHandler{
-		DB: db,
-	}).ServeHTTP(w, r)
-}))
+// ────────────────────────────────────────
+// Listings: count (GET)
+// ────────────────────────────────────────
+
+mux.Handle("/api/listings/count",
+	&listings.CountHandler{
+		DB:     db,
+		Guards: guardsCommon,
+	},
+)
 ```
 
-This is a bit of a hassle, but no magic, hence easy to debug.
+This is a bit of a hassle, but it has its pros.
 
 ## 3. Guards (Middleware)
 
-Guards are manually applied per handler, no middleware patterns, no next(). A guard simply outputs true and false which is checked inside a handler's loop over the guards. They are opt-in.
+Guards are manually applied per handler, no middleware pattern. A guard simply outputs true and false which is checked inside a handler's loop over the guards. They are opt-in.
 
 A set of guards per handler/route is hard-coded in routes.go, but the guards can be disabled via their boolean flags inside .env.
 
@@ -611,7 +639,7 @@ CreateHandler: Handles POST, parses body, mutates DB. Therefore, it is maximally
 
 SearchHandler and CountHandler do not use PoW.
 
-PoW is the computation inflicted on the browser, see this line
+PoW is a computation imposed on the browser, see this line
 
 ```ts
 const nonce = await solvePoW(...)
@@ -619,7 +647,7 @@ const nonce = await solvePoW(...)
 
 inside App.tsx. At the moment, it blocks the UI, ignores AbortController, and it cannot be interrupted. If user navigates away, the computation continues until solved.
 
-PoW has two parameters: the difficulty level and the TTL value. The latter cannot be too small as a slower device won't be able to complete the challenge. It can not be too big as the attacker can solve it quickly and then bombard the endpoint with a solved challenge for the remaining TTL time. The recommendation is 2-3x value a slow computer requires for solving. For the difficulty level 21, the TTL is set to 100s.
+PoW has two parameters: the difficulty level and the TTL value. The latter cannot be too small as a slower device won't be able to complete the challenge. It can not be too big as the attacker can solve it quickly and then bombard the endpoint with a solved challenge for the remaining TTL time. The recommendation is 2-3x value a slow computer requires solving. For the difficulty level 21, the TTL is set to 100s.
 
 ## 4. Timeouts
 
@@ -673,7 +701,7 @@ useEffect(() => {
 
 Note `[]` as the last argument, so the effect gets executed only when App mounts. However, fetch can outlive App. If App unmounts while fetch is in progress, ac.signal becomes "abort" and prevents the execution of `then`. The code jumps into `catch` which does nothing. We have achieved correct fetch abortion and App unmounting, but was it necessary?!
 
-What is annoying about correctness and error handling here is that there are only three API endpoints, and already 500 LOC of frontend, with 24 (!) instances of "abort". ChatGPT5 produces working code here, but this needs some rewriting.
+What is annoying about correctness and error handling here is that there are only three API endpoints, and already 500 LOC of frontend, with 24 (!) instances of "abort". ChatGPT5 produces working code though.
 
 The counter is stored and updated as everything in React:
 
@@ -685,22 +713,46 @@ setTotalCount((n) => (n === null ? n : n + 1));
 
 Cumbersome, but not as bad as abortion.
 
-# Part III: What Will Survive?
+# Part III: Philosophy
+
+## 1. The 12-Factor manifesto (Distilled by ChatGPT5)
+
+1. Codebase – one repo per app.
+
+2. Dependencies – explicitly declared, not installed by vibes.
+
+3. Config – stored in environment variables.
+
+4. Backing services – treated as attached resources, not hardwired pets.
+
+5. Build, release, run – strictly separated stages.
+
+6. Processes – stateless and share-nothing.
+
+7. Port binding – app exposes its own port.
+
+8. Concurrency – scale via processes.
+
+9. Disposability – fast startup and graceful shutdown.
+
+10. Dev/prod parity – environments as similar as practical.
+
+11. Logs – treated as event streams.
+
+12. Admin tasks – run as one-off processes.
+
+## 2. What Will Survive?
 
 - VPS or PaaS? VPS. 20TB bandwidth @ 5 euros vs Disneyland.
 
-- Postgres: one server per app with Docker guarantees isolation and easier setup in the future.
+- Postgres with one server per app: isolation and easier setup in the future.
 
-- Docker Compose is kind of fragile and obfuscating.
+- Dockerfile + Makefile, no Docker Compose.
 
-- `go build` instead of Node/Deno/Bun. Node is a disaster.
+- `go build`. Node is a disaster.
 
-- React is "HTML with accessibility" (via shadCN). However, doing graphics in code always feels wrong for some reason (TikZ in LaTeX, Mermaid, Markdown instead of LibreOffice). We need Blender here, not virtual DOM and "components".
+- React is okish. However, doing graphics in code always feels wrong for some reason (TikZ in LaTeX, Mermaid, Markdown instead of LibreOffice). We need Blender here, not virtual DOM and "components".
 
-- Fetch and AbortController need to be dropped in favor of something more succinct and automated.
+- AbortController is abomination.
 
-- ChatGPT is incredible in full stack web dev, but it likes to delete working code when adding something new.
-
-VPS, Postgres, Makefile, Dockerfile, Go, sqlc, net/http, vite, React, and README.md with details and a real running app code on github rather than starter templates, GUI panels, serverless services.
-
-One thing about any web app is that it can never be complete. One can endlessly harden routes against bots or simplify code, or optimize/learn PostgreSQL.
+- ChatGPT is amazing, but it also likes to delete working code when adding something new.
