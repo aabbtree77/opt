@@ -1,12 +1,10 @@
 package listings
 
 import (
-	"context"
 	"crypto/sha256"
 	"database/sql"
 	"net/http"
 	"strings"
-	"time"
 
 	"app.root/config"
 	"app.root/db"
@@ -52,12 +50,23 @@ func (h *CreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ip := strings.TrimSpace(guards.GetIP(r))
 	ipHash := sha256.Sum256([]byte(ip + h.Cfg.ServerSalt))
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
 	store := db.NewStore(h.DB)
 
-	listing, err := store.CreateListing(ctx, db.CreateListingParams{
+	//Very bad idea to IP rate limit based on DB, it actually facilitates DDOS!
+	//Replaced this with in RAM IP rate limiter, chatgpt suggests using Redis later on.
+	/*
+		count, err := store.CountRecentListingsByIP(r.Context(), ipHash[:])
+		if err != nil {
+			httpjson.InternalError(w, "db error")
+			return
+		}
+		if count >= 1000 {
+			httpjson.TooManyRequests(w, "RATE_LIMITED", "too many posts")
+			return
+		}
+	*/
+
+	listing, err := store.CreateListing(r.Context(), db.CreateListingParams{
 		Body:   body,
 		IpHash: ipHash[:],
 	})

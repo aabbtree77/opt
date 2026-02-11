@@ -1,7 +1,6 @@
 package listings
 
 import (
-	"context"
 	"database/sql"
 	"encoding/base64"
 	"net/http"
@@ -43,10 +42,6 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// DB timeout protection
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-	defer cancel()
-
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 
 	limit := int32(30)
@@ -63,7 +58,7 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if cursor == "" {
 		res, err := store.SearchListingsFirstPage(
-			ctx,
+			r.Context(),
 			db.SearchListingsFirstPageParams{
 				Column1: q,
 				Limit:   limit,
@@ -90,7 +85,7 @@ func (h *SearchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		res, err := store.SearchListingsAfterCursor(
-			ctx,
+			r.Context(),
 			db.SearchListingsAfterCursorParams{
 				Column1:   q,
 				CreatedAt: createdAt,

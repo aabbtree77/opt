@@ -13,7 +13,7 @@ import (
 func RegisterRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 
 	// ────────────────────────────────────────
-	// Common guards
+	// Common guards (reads + writes)
 	// ────────────────────────────────────────
 
 	var guardsCommon []guards.Guard
@@ -28,8 +28,10 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 		)
 	}
 
+	// Body size only meaningful for endpoints with request body.
+	var bodyGuard []guards.Guard
 	if cfg.BodySizeLimiter.Enable {
-		guardsCommon = append(guardsCommon,
+		bodyGuard = append(bodyGuard,
 			guards.NewBodySizeGuard(true, cfg.BodySizeLimiter.MaxBytes),
 		)
 	}
@@ -46,42 +48,46 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	}
 
 	// ────────────────────────────────────────
-	// Listings: search
+	// Listings: search (GET)
 	// ────────────────────────────────────────
 
-	mux.Handle("/api/listings/search", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		(&listings.SearchHandler{
+	mux.Handle("/api/listings/search",
+		&listings.SearchHandler{
 			DB:     db,
 			Guards: guardsCommon,
-		}).ServeHTTP(w, r)
-	}))
+		},
+	)
 
 	// ────────────────────────────────────────
-	// Listings: create
+	// Listings: create (POST)
 	// ────────────────────────────────────────
 
-	var guardsCreate = append([]guards.Guard{}, guardsCommon...)
+	guardsCreate := append([]guards.Guard{}, guardsCommon...)
+	guardsCreate = append(guardsCreate, bodyGuard...)
 
 	if cfg.ProofOfWork.Enable {
 		guardsCreate = append(guardsCreate, guards.NewPoWGuard(powCfg))
 		mux.Handle("/pow/challenge", guards.NewPoWHandler(powCfg))
 	}
 
-	mux.Handle("/api/listings/create", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		(&listings.CreateHandler{
+	mux.Handle("/api/listings/create",
+		&listings.CreateHandler{
 			DB:     db,
 			Cfg:    cfg,
 			Guards: guardsCreate,
-		}).ServeHTTP(w, r)
-	}))
+		},
+	)
+
+	// ────────────────────────────────────────
+	// Listings: count (GET)
+	// ────────────────────────────────────────
+
+	mux.Handle("/api/listings/count",
+		&listings.CountHandler{
+			DB:     db,
+			Guards: guardsCommon,
+		},
+	)
 
 	// ────────────────────────────────────────
 	// SPA fallback
@@ -90,19 +96,4 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB, cfg *config.Config) {
 	mux.Handle("/", spa.SPAHandler{
 		Dir: "web",
 	})
-
-	// ────────────────────────────────────────
-	// Global counter of listings above search
-	// ────────────────────────────────────────
-
-	mux.Handle("/api/listings/count", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		(&listings.CountHandler{
-			DB: db,
-		}).ServeHTTP(w, r)
-	}))
-
 }
