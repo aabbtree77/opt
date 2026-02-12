@@ -10,7 +10,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -63,10 +62,8 @@ func (h *PoWHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// never cache PoW challenges
 	w.Header().Set("Cache-Control", "no-store")
-
-	ip := normalizeIP(GetIP(r))
-	ua := r.UserAgent()
 
 	ch := make([]byte, 16)
 	_, _ = rand.Read(ch)
@@ -81,8 +78,6 @@ func (h *PoWHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mac := hmac.New(sha256.New, h.Key)
 	mac.Write([]byte(chStr))
 	mac.Write(expBytes)
-	mac.Write([]byte(ip))
-	mac.Write([]byte(ua))
 	hmacPart := mac.Sum(nil)
 
 	token := base64.RawStdEncoding.EncodeToString(hmacPart) +
@@ -107,17 +102,14 @@ Guard
 */
 
 type PoWGuard struct {
-	Cfg  PowConfig
-	Key  []byte
-	mu   sync.Mutex
-	used map[string]int64
+	Cfg PowConfig
+	Key []byte
 }
 
 func NewPoWGuard(cfg PowConfig) *PoWGuard {
 	return &PoWGuard{
-		Cfg:  cfg,
-		Key:  cfg.SecretKey,
-		used: make(map[string]int64),
+		Cfg: cfg,
+		Key: cfg.SecretKey,
 	}
 }
 
@@ -134,25 +126,30 @@ func (g *PoWGuard) Check(r *http.Request) bool {
 		return false
 	}
 
+	// hard cap nonce size
 	if len(nonce) > 64 {
 		return false
 	}
 
-	ip := normalizeIP(GetIP(r))
-	ua := r.UserAgent()
-
-	err := g.verifyWithReplayProtection(challenge, nonce, token, ip, ua)
-	return err == nil
+	return VerifyPoW(g.Cfg, g.Key, challenge, nonce, token) == nil
 }
 
 /*
 ────────────────────────────────────────────────────────────
-Verification + Replay protection
+Verification
 ────────────────────────────────────────────────────────────
 */
 
-func (g *PoWGuard) verifyWithReplayProtection(challenge, nonce, token, ip, ua string) error {
-	exp, err := parseToken(g.Key, challenge, token, ip, ua)
+func VerifyPoW(cfg PowConfig, key []byte, challenge, nonce, token string) error {
+	if !cfg.Enable {
+		return nil
+	}
+
+	if cfg.Difficulty == 0 || cfg.TTL <= 0 || len(key) == 0 {
+		return errors.New("invalid pow config")
+	}
+
+	exp, err := parseToken(key, challenge, token)
 	if err != nil {
 		return err
 	}
@@ -161,33 +158,14 @@ func (g *PoWGuard) verifyWithReplayProtection(challenge, nonce, token, ip, ua st
 		return errors.New("challenge expired")
 	}
 
-	if !checkDifficulty(challenge, nonce, g.Cfg.Difficulty) {
+	if !checkDifficulty(challenge, nonce, cfg.Difficulty) {
 		return errors.New("invalid pow")
 	}
 
-	// replay protection
-	key := challenge + ":" + nonce
-
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	// cleanup expired entries lazily
-	now := time.Now().Unix()
-	for k, v := range g.used {
-		if v < now {
-			delete(g.used, k)
-		}
-	}
-
-	if _, exists := g.used[key]; exists {
-		return errors.New("replay detected")
-	}
-
-	g.used[key] = exp
 	return nil
 }
 
-func parseToken(key []byte, challenge, token, ip, ua string) (int64, error) {
+func parseToken(key []byte, challenge, token string) (int64, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 2 {
 		return 0, errors.New("invalid token format")
@@ -208,8 +186,6 @@ func parseToken(key []byte, challenge, token, ip, ua string) (int64, error) {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(challenge))
 	mac.Write(expRaw)
-	mac.Write([]byte(ip))
-	mac.Write([]byte(ua))
 	expected := mac.Sum(nil)
 
 	if !hmac.Equal(expected, hmacPart) {
@@ -218,12 +194,6 @@ func parseToken(key []byte, challenge, token, ip, ua string) (int64, error) {
 
 	return exp, nil
 }
-
-/*
-────────────────────────────────────────────────────────────
-Difficulty check
-────────────────────────────────────────────────────────────
-*/
 
 func checkDifficulty(challenge, nonce string, difficulty uint8) bool {
 	chBytes, err := base64.RawStdEncoding.DecodeString(challenge)

@@ -639,6 +639,8 @@ CreateHandler: Handles POST, parses body, mutates DB. Therefore, it is maximally
 
 SearchHandler and CountHandler do not use PoW.
 
+### 3.1 Proof of Work
+
 PoW is a computation imposed on the browser, see this line
 
 ```ts
@@ -647,11 +649,49 @@ const nonce = await solvePoW(...)
 
 inside App.tsx. At the moment, it blocks the UI, ignores AbortController, and it cannot be interrupted. If user navigates away, the computation continues until solved.
 
+It is a concrete barrier tied to:
+
+challenge + expiry + IP + UserAgent.
+
+- A solved token cannot be reused from another IP.
+
+- Cannot be replayed multiple times.
+
+- Cannot be farmed centrally and distributed.
+
+- Cannot be shared between bot workers.
+
+Potential future optimizations:
+
+- replay store as time-bucket wheel,
+
+- shard PoWGuard by IP,
+
+- move replay tracking to Redis for multi-instance scale.
+
 PoW has two parameters: the difficulty level and the TTL value. The latter cannot be too small as a slower device won't be able to complete the challenge. It can not be too big as the attacker can solve it quickly and then bombard the endpoint with a solved challenge for the remaining TTL time. The recommendation is 2-3x value a slow computer requires solving. For the difficulty level 21, the TTL is set to 100s.
+
+### 3.2 IP Rate Limiting
+
+The first version leaked memory, the second one was a simple fixed window. The third variant is a lot of things, supposedly fixes vulnerability to synchronized abuse (not tested):
+
+- Proper X-Forwarded-For parsing (first IP only).
+
+- IPv6 normalization.
+
+- Sliding window per IP (not global reset bucket).
+
+- Per-IP expiry cleanup.
+
+- No global synchronized window resets.
+
+- Works cleanly behind Caddy.
+
+- Memory bounded by natural expiry.
 
 ## 4. Timeouts
 
-Timeout is protection against DB misbehavior, in order not to melt the server due to goroutine pile up.
+Timeout is protection against DB misbehavior, to prevent goroutine pile up.
 
 Each request handler has a timeout. Read/lightweight endpoints - 3s., CreateHandler - 5s. If DB stalls, or there is a network hiccup, the context is canceled: the driver sends a cancellation signal to PostgreSQL or aborts the TCP connection, returns context deadline exceeded, the handler stops waiting, returns 500 or timeout. Otherwise goroutine would hang indefinitely.
 
@@ -672,9 +712,7 @@ Once it activates, everything downstream stops.
 
 ## 5. Frontend
 
-The frontend code is App.tsx.
-
-To fetch the listings count, ChatGPT5 prefers correctness over clarity:
+See App.tsx. For correctness, Fetch is supposed to be accompanied by AbortController, but this might be overcomplication.
 
 ```ts
 async function fetchCount(signal?: AbortSignal): Promise<number> {
@@ -685,7 +723,7 @@ async function fetchCount(signal?: AbortSignal): Promise<number> {
 }
 ```
 
-The grand idea here is that
+The grand idea:
 
 **Effects must be written as if the component can disappear at any time.**
 
@@ -713,46 +751,6 @@ setTotalCount((n) => (n === null ? n : n + 1));
 
 Cumbersome, but not as bad as abortion.
 
-# Part III: Philosophy
+# References
 
-## 1. The 12-Factor manifesto (Distilled by ChatGPT5)
-
-1. Codebase – one repo per app.
-
-2. Dependencies – explicitly declared, not installed by vibes.
-
-3. Config – stored in environment variables.
-
-4. Backing services – treated as attached resources, not hardwired pets.
-
-5. Build, release, run – strictly separated stages.
-
-6. Processes – stateless and share-nothing.
-
-7. Port binding – app exposes its own port.
-
-8. Concurrency – scale via processes.
-
-9. Disposability – fast startup and graceful shutdown.
-
-10. Dev/prod parity – environments as similar as practical.
-
-11. Logs – treated as event streams.
-
-12. Admin tasks – run as one-off processes.
-
-## 2. What Will Survive?
-
-- VPS or PaaS? VPS. 20TB bandwidth @ 5 euros vs Disneyland.
-
-- Postgres with one server per app: isolation and easier setup in the future.
-
-- Dockerfile + Makefile, no Docker Compose.
-
-- `go build`. Node is a disaster.
-
-- React is okish. However, doing graphics in code always feels wrong for some reason (TikZ in LaTeX, Mermaid, Markdown instead of LibreOffice). We need Blender here, not virtual DOM and "components".
-
-- AbortController is abomination.
-
-- ChatGPT is amazing, but it also likes to delete working code when adding something new.
+[The Twelve-Factor App](https://12factor.net/)

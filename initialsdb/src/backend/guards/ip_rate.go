@@ -3,6 +3,7 @@ package guards
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,28 +22,29 @@ type IPRateLimiterConfig struct {
 
 //
 // ──────────────────────────────────────────────
-// Guard
+// Guard (sliding window per IP)
 // ──────────────────────────────────────────────
 //
 
-// IPRateGuard is a fixed-window per-IP rate limiting guard.
-// It is silent: it does not write responses or redirect.
+type ipEntry struct {
+	count     int
+	windowEnd time.Time
+}
+
 type IPRateGuard struct {
-	mu              sync.Mutex
-	entries         map[string]int
-	maxRequests     int
-	window          time.Duration
-	currWindowStart time.Time
-	enable          bool
+	mu          sync.Mutex
+	entries     map[string]*ipEntry
+	maxRequests int
+	window      time.Duration
+	enable      bool
 }
 
 func NewIPRateGuard(cfg IPRateLimiterConfig) *IPRateGuard {
 	return &IPRateGuard{
-		enable:          cfg.Enable,
-		maxRequests:     cfg.MaxRequests,
-		window:          cfg.Window,
-		entries:         make(map[string]int),
-		currWindowStart: time.Now(),
+		enable:      cfg.Enable,
+		maxRequests: cfg.MaxRequests,
+		window:      cfg.Window,
+		entries:     make(map[string]*ipEntry),
 	}
 }
 
@@ -51,8 +53,12 @@ func (g *IPRateGuard) Check(r *http.Request) bool {
 		return true
 	}
 
-	ip := GetIP(r)
-	if ip == "" || g.maxRequests <= 0 || g.window <= 0 {
+	if g.maxRequests <= 0 || g.window <= 0 {
+		return true
+	}
+
+	ip := normalizeIP(GetIP(r))
+	if ip == "" {
 		return true
 	}
 
@@ -61,35 +67,59 @@ func (g *IPRateGuard) Check(r *http.Request) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	// Window rollover
-	if now.Sub(g.currWindowStart) >= g.window {
-		g.entries = make(map[string]int)
-		g.currWindowStart = now
+	entry, exists := g.entries[ip]
+
+	if !exists || now.After(entry.windowEnd) {
+		// start new window for this IP
+		g.entries[ip] = &ipEntry{
+			count:     1,
+			windowEnd: now.Add(g.window),
+		}
+		g.cleanup(now)
+		return true
 	}
 
-	if g.entries[ip] >= g.maxRequests {
+	if entry.count >= g.maxRequests {
 		return false
 	}
 
-	g.entries[ip]++
+	entry.count++
 	return true
 }
 
 //
 // ──────────────────────────────────────────────
-// IP extraction
+// Cleanup (lazy, cheap)
 // ──────────────────────────────────────────────
 //
 
+func (g *IPRateGuard) cleanup(now time.Time) {
+	// Lazy cleanup: remove expired IP buckets
+	for ip, entry := range g.entries {
+		if now.After(entry.windowEnd) {
+			delete(g.entries, ip)
+		}
+	}
+}
+
+//
+// ──────────────────────────────────────────────
+// IP extraction (Caddy-safe)
+// ──────────────────────────────────────────────
+//
+
+/*
 func GetIP(r *http.Request) string {
 	// DEV / TEST override
-	if ip := r.Header.Get("X-Test-IP"); ip != "" {
+	if ip := strings.TrimSpace(r.Header.Get("X-Test-IP")); ip != "" {
 		return ip
 	}
 
-	// Behind proxy (assumed trusted at infra level)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return xff
+	// Properly parse X-Forwarded-For
+	// It may contain multiple IPs: client, proxy1, proxy2
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
 	}
 
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -98,4 +128,48 @@ func GetIP(r *http.Request) string {
 	}
 
 	return ""
+}
+*/
+
+func GetIP(r *http.Request) string {
+	// DEV / TEST override (validated)
+	if ip := strings.TrimSpace(r.Header.Get("X-Test-IP")); ip != "" {
+		if parsed := net.ParseIP(ip); parsed != nil {
+			return parsed.String()
+		}
+	}
+
+	// Behind trusted reverse proxy (Caddy)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		candidate := strings.TrimSpace(parts[0]) // first = original client
+
+		if parsed := net.ParseIP(candidate); parsed != nil {
+			return parsed.String()
+		}
+	}
+
+	// Direct connection fallback
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		if parsed := net.ParseIP(host); parsed != nil {
+			return parsed.String()
+		}
+	}
+
+	return ""
+}
+
+//
+// ──────────────────────────────────────────────
+// IP normalization (IPv6-safe)
+// ──────────────────────────────────────────────
+//
+
+func normalizeIP(ip string) string {
+	parsed := net.ParseIP(strings.TrimSpace(ip))
+	if parsed == nil {
+		return ""
+	}
+	return parsed.String()
 }
