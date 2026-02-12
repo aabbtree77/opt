@@ -32,7 +32,7 @@ Each application is fully self-contained using Docker Compose, including its own
 
 ## 1. VPS Setup (Hetzner)
 
-Choose Ubuntu 22.04, create user `deploy` with passwordless sudo, ensure login with ssh keys and passphrase, disable password logins. Optionally set up the ufw rules, see ufw.sh.
+Dev: Ubuntu 22.04 x86, VPS: Ubuntu 22.04 arm64 ([Hetzner CAX11](https://www.hetzner.com/cloud)). VPS: Create user `deploy` with passwordless sudo, ensure login with ssh keys and passphrase, disable password logins. Optionally set the ufw rules, see ufw.sh.
 
 Create `/opt` (`root` owned):
 
