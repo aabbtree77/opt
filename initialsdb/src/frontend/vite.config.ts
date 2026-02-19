@@ -15,5 +15,18 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
   },
+
+  server: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/pow": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
+  },
 })
 

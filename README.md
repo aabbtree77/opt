@@ -1,12 +1,18 @@
 # Introduction
 
-**initialsdb** is a public bulletin board (message store) implemented as a Go backend serving a React SPA, together with PostgreSQL and Docker Compose infrastructure. It uses proof of work and rate limiting to fight bots.
+**initialsdb** is a public bulletin board (message store) implemented as a Go backend serving a React SPA, together with PostgreSQL and Docker Compose. It uses proof of work and rate limiting to fight bots.
 
-This repository includes application code and infrastructure so that one can host more such web apps on the same VPS, not just initialsdb. Makefile, Dockerfile, docker-compose.yml files and this readme.md show how to replicate the whole system end-to-end.
+This repo: code + infrastructure. You can host more such web apps on the same VPS, not just initialsdb.
 
-The big picture:
+Infrastructure: Makefile, Dockerfile, docker-compose.yml. They automate environments:
 
-- 12-factor inspired.
+- debug: Postgres runs inside a dev mode container. Go is debuggable in VS Code, React in browser with F12 and React Dev Tools addon.
+
+- dev: almost prod, just to test all the containers and the app locally, but no HTTPS (TLS), no Caddy, no debugging.
+
+- prod: make commands will update the VPS, for initial setup follow this README.md below.
+
+Mode details:
 
 - Browser → Caddy: HTTPS (443).
 
@@ -20,13 +26,15 @@ The big picture:
 
 - No building inside containers. Cross-compilation to ARM64 happens on dev.
 
-- Go compiles to binary (unlike Js/Ts/Node), needs 10x less RAM (than Js/Ts/Node).
+- Go compiles to x86 and arm64 (unlike Js/Ts/Node, also does not hog RAM).
 
 - React solves accessibility/EU compliance via shadcn/ui and Radix UI.
 
-- PostgreSQL is No. 1: [SO, 2025.](https://survey.stackoverflow.co/2025/technology#1-databases)
+- PostgreSQL is web-ready and No. 1: [SO, 2025.](https://survey.stackoverflow.co/2025/technology#1-databases)
 
-Each application is fully self-contained using Docker Compose, including its own database. Infrastructure services such as TLS termination (Caddy) are shared per host.
+- 12-factor inspired.
+
+Each application runs its own Postgres server and data volume. Caddy is global per VPS.
 
 # Part I: Infrastructure
 
@@ -750,6 +758,115 @@ setTotalCount((n) => (n === null ? n : n + 1));
 ```
 
 Cumbersome, but not as bad as abortion.
+
+# Part III: Debugging
+
+Containers make debugging harder. One should focus on logging instead. Still, it is great to debug with React extensions in the browser, and develop with hot reload. VS Code allows to step through Go too. So we add `debug` folder for this purpose.
+
+Docker with .env and .secret is reused from `dev` folder only to run Postgres.
+
+## Debug Workflow
+
+Terminal 1 (containerized Postgres):
+
+```bash
+cd ~/opt/initialsdb/debug
+make db-up
+```
+
+Terminal 2 (Go backend with full debug symbols):
+
+```bash
+cd ~/opt/initialsdb/debug
+make backend-run
+```
+
+Terminal 3 (React frontend with hot reload, Vite dev):
+
+```bash
+cd ~/opt/initialsdb/debug
+make frontend-run
+```
+
+To exit, run make db-down and twice ctrl+C (to kill backend and frontend).
+
+## vite.config.ts
+
+In the debug mode, frontend talks to backend directly due to these lines inside vite.config.ts:
+
+```ts
+server: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/pow": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
+  },
+```
+
+If you add more endpoints which are not under /api or /pow (routes.go), they should also appear here.
+
+To add an endpoint takes:
+
+- Use of Fetch and AbortController APIs in src/frontend/src/App.tsx.
+
+- Guard and config param loading in src/backend/routes/routes.go.
+
+- Business logic inside ServeHTTP(w http.ResponseWriter, r \*http.Request), e.g. src/backend/listings/count.go.
+
+- Entry inside vite.config.ts if the endpoint is not under /api or /pow.
+
+No wonder people invent metaframeworks and add fetch automation layers, but these become the n+1 thing when one decides to add a mobile app later on, when one goes back to JSON APIs.
+
+So this is manual and verbose, but also very standard, debuggable, and extendable.
+
+## Note on npm
+
+After a while, npm starts barfing about vulnerable versions, severity, audits. The problem is devDependencies inside package.json. Linting/tooling must stay one major behind bleeding edge (10.0.0):
+
+```json
+"devDependencies": {
+    "@eslint/js": "^9.0.0",
+}
+```
+
+The only critical check to execute:
+
+```bash
+cd ~/opt/initialsdb/src/frontend
+npm audit --omit=dev
+found 0 vulnerabilities
+```
+
+The rest is the npm noise which is safe to ignore.
+
+What is also critical is that Tailwind3 is applied, not Tailwind4:
+
+```json
+"tailwindcss": "^3.4.19",
+```
+
+If for some reason everything gets updated to the latest versions, Tailwind4 will break all the styling here, so keep it at 3.4.19, manually. Set the value inside package.json, and reinstall Node packages:
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+## VS Code
+
+Formatting depends on where one opens the editor. Open one instance from backend for Go editing, another one from frontend for Ts, .vscode settings will be loaded automatically.
+
+Ctrl + P - to quickly search and open a file.
+
+Ctrl + Shift + F - search inside files per project.
+
+Install all the suggestions so that they are not prompted repetitively.
 
 # References
 
