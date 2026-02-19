@@ -1,3 +1,11 @@
+<p align="center">
+  <em>Black Square</em>
+</p>
+
+<p align="center">
+  <img src="docs/Mikhail-Vachaev-Chernyj-Kvadrat.jpg" alt="Mikhail Vachaev's Black Square" style="width: 90%; height: auto;" />
+</p>
+
 # Introduction
 
 **initialsdb** is a public bulletin board (message store) implemented as a Go backend serving a React SPA, together with PostgreSQL and Docker Compose. It uses proof of work and rate limiting to fight bots.
@@ -184,7 +192,7 @@ make net-remove
 On dev:
 
 ```bash
-cd deploy
+cd ~/opt/initialsdb/deploy
 make copy
 make copy-backup-script
 make install-backup-cron
