@@ -38,7 +38,7 @@ Mode details:
 
 - React solves accessibility/EU compliance via shadcn/ui and Radix UI.
 
-- PostgreSQL is web-ready and No. 1: [SO, 2025.](https://survey.stackoverflow.co/2025/technology#1-databases)
+- PostgreSQL: web-ready (write many, read many), psql cli.
 
 - 12-factor inspired.
 
@@ -877,5 +877,17 @@ Ctrl + Shift + F - search inside files per project.
 Install all the suggestions so that they are not prompted repetitively.
 
 # References
+
+[Just Use Postgres for Everything](https://www.amazingcto.com/postgres-for-everything/)
+
+[SO Survey (2025): PostgreSQL is No.1](https://survey.stackoverflow.co/2025/technology#1-databases)
+
+[99% of Developers Don't Get PostgreSQL](https://www.youtube.com/watch?v=P8rrhZTPEAQ)
+
+[JUST F\*CKING USE REACT](https://justfuckingusereact.com/)
+
+[Just F\*cking React to React](https://dagelf.github.io/justreacttoreact/index.html)
+
+[Just f\*cking use HTML](https://justfuckingusehtml.com/)
 
 [The Twelve-Factor App](https://12factor.net/)
