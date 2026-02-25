@@ -58,7 +58,12 @@ make install-backup-cron
 
 VPS:
 
-Read below for details.
+```bash
+cd /opt/initialsdb
+make up
+```
+
+Read below for details how to set this all up, stop/redeploy, clone, debug.
 
 # Part I: Infrastructure
 
@@ -782,6 +787,8 @@ setTotalCount((n) => (n === null ? n : n + 1));
 ```
 
 Cumbersome, but not as bad as abortion.
+
+Feb 25, 2026 Update: Removed AbortController entirely as unnecessary complication, this should not be in the user space somehow. We have enough of that try catch nonsense around the fetch API to begin with.
 
 # Part III: Debugging
 
