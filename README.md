@@ -3,24 +3,22 @@
 </p>
 
 <p align="center">
-  <img src="docs/Mikhail-Vachaev-Chernyj-Kvadrat.jpg" alt="Mikhail Vachaev's Black Square" style="width: 90%; height: auto;" />
+  <img src="docs/Mikhail-Vachaev-Chernyj-Kvadrat.jpg" alt="Mikhail Vachaev's Black Square" style="width: 70%; height: auto;" />
 </p>
 
 # Introduction
 
-**initialsdb** is a public bulletin board (message store) implemented as a Go backend serving a React SPA, together with PostgreSQL and Docker Compose. It uses proof of work and rate limiting to fight bots.
+**initialsdb** is a public bulletin board (message store) implemented as Go + React + PostgreSQL. It uses proof of work and rate limiting to fight bots.
 
-This repo: code + infrastructure. You can host more such web apps on the same VPS, not just initialsdb.
+This repo: code + infrastructure. The latter (Makefile, Dockerfile, docker-compose.yml) automates environments:
 
-Infrastructure: Makefile, Dockerfile, docker-compose.yml. They automate environments:
+- debug: Postgres runs inside a dev mode container. Go is debuggable in VS Code, React in browser with F12 and the React Dev Tools addon.
 
-- debug: Postgres runs inside a dev mode container. Go is debuggable in VS Code, React in browser with F12 and React Dev Tools addon.
+- dev: almost prod, to test containers locally, no Caddy, no debugging.
 
-- dev: almost prod, just to test all the containers and the app locally, but no HTTPS (TLS), no Caddy, no debugging.
+- prod: make commands will update everything on VPS, for initial setup follow this README.md below.
 
-- prod: make commands will update the VPS, for initial setup follow this README.md below.
-
-Mode details:
+Technology stack:
 
 - Browser → Caddy: HTTPS (443).
 
@@ -34,7 +32,7 @@ Mode details:
 
 - No building inside containers. Cross-compilation to ARM64 happens on dev.
 
-- Go compiles to x86 and arm64 (unlike Js/Ts/Node, also does not hog RAM).
+- Go compiles to x86 and arm64 (does not hog VPS with packages).
 
 - React solves accessibility/EU compliance via shadcn/ui and Radix UI.
 
@@ -42,7 +40,25 @@ Mode details:
 
 - 12-factor inspired.
 
-Each application runs its own Postgres server and data volume. Caddy is global per VPS.
+- initialsdb runs its own Postgres and data volume. Caddy is global per VPS.
+
+The deployment requires setting up a VPS, and running Makefiles, e.g.
+
+Dev:
+
+```bash
+cd ~/opt/initialsdb/src
+make build
+
+cd ~/opt/initialsdb/deploy
+make copy
+make copy-backup-script
+make install-backup-cron
+```
+
+VPS:
+
+Read below for details.
 
 # Part I: Infrastructure
 
@@ -769,7 +785,7 @@ Cumbersome, but not as bad as abortion.
 
 # Part III: Debugging
 
-Containers make debugging harder. One should focus on logging instead. Still, it is great to debug with React extensions in the browser, and develop with hot reload. VS Code allows to step through Go too. So we add `debug` folder for this purpose.
+Containers and the web complicate debugging. One will focus more on logging. Still, it is great to debug with React extensions in the browser, and develop with hot reload. VS Code allows to step through Go. So we add `debug` folder for this purpose.
 
 Docker with .env and .secret is reused from `dev` folder only to run Postgres.
 
@@ -866,6 +882,22 @@ rm -rf node_modules package-lock.json
 npm install
 ```
 
+## Debugging CSS
+
+AIs do not have visual feedback, which demands adjusting style/appearance manually.
+
+Ucomment the following lines in frontend/src/index.css:
+
+```css
+/*
+* {
+  outline: 1px solid red;
+}
+*/
+```
+
+This technique is well-known and is absolutely quintessential.
+
 ## VS Code
 
 Formatting depends on where one opens the editor. Open one instance from backend for Go editing, another one from frontend for Ts, .vscode settings will be loaded automatically.
@@ -874,15 +906,51 @@ Ctrl + P - to quickly search and open a file.
 
 Ctrl + Shift + F - search inside files per project.
 
+Ctrl + Shift + P - reload window, restart TS server.
+
 Install all the suggestions so that they are not prompted repetitively.
+
+# FAQ
+
+## Why Go for Backend? Why not Python or Ts?
+
+- Go compiles to binary, so we can do everything on dev and just copy a single file to the container. Compare this to
+
+  ```Docker
+  RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+  ```
+
+or "npm run build" for anything on Node. These tend to break.
+
+- Go has net/http in stdlib, which, coupled with sqlc, removes a lot of paralysis by analysis. Single paradigm for everything: "OO", build system, parallelism. This does not guarantee uniformity of implementations, but still, so rare, so incredible.
+
+- No async/await/Promise noise. DB transactions run inside goroutines, but a user does not care. One can play with mutexes for concurrent map updates in rate limiters, but this is also avoidable/deferrable to AI/libs. I used a goroutine once in the entire web app, and it is a standard way to do a graceful shutdown in main.go, generated by AI and tested.
+
+The major con of Go is that it is not as succinct as say Python or F#. It is easier to debug, but it is not cool. Coolness is important, languages are like motorcycles. Go is not there, just like Pascal or Ada.
+
+Python is more succinct and more beefed up with libs, some pretty unique, but also paralysis-inducing. We get into Django vs FastAPI vs Starlette vs Litestar... akin to Express vs Hono vs ElysiaJS vs Next.js vs Tanstack Start... in Js/Ts. This is unhealthy. Async Python is also just repeating Js, FastAPI Cloud vs Vercel, [syntax.fm](https://syntax.fm/), everything old is new again.
+
+The idea here is to keep React as "new HTML", strictly for frontend, quite minimally, without React Router. No auth as app's state provider, no context passing and all that jazz. ChatGPT5 initially wrote App.tsx with AbortController API, useRef, useCallback hooks, I then asked it to rewrite it without these instruments.
+
+Compile a shadcn SPA to Js, serve from Go as "Js artifact", leave the problem of unified frontend + backend for research and those into git bisect...
+
+## Is Go + React lite the Ultimate Answer?
+
+"We got it right this time..."
+
+;).
+
+I love this stack, but still keep an eye on Python, and I do not miss Node. We are stuck with Js/Ts in the UI part for good.
+
+One thing to avoid is [overautomation in Go](https://www.reddit.com/r/golang/comments/1k6hil6/is_there_a_fastapi_equivalent_in_go/), at least I would not go in this direction.
+
+What needs to be done better concretely in this repo is a more succinct workflow from code to "productionization".
+
+On the other hand, a single Makefile "command center" is a disaster, harder to debug. There are about 5 Makefiles here, so some manual switching/sequencing and verbosity, but once the things go South, at least you know where you are standing.
 
 # References
 
 [Just Use Postgres for Everything](https://www.amazingcto.com/postgres-for-everything/)
-
-[SO Survey (2025): PostgreSQL is No.1](https://survey.stackoverflow.co/2025/technology#1-databases)
-
-[99% of Developers Don't Get PostgreSQL](https://www.youtube.com/watch?v=P8rrhZTPEAQ)
 
 [JUST F\*CKING USE REACT](https://justfuckingusereact.com/)
 
