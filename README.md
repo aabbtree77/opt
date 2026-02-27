@@ -1003,7 +1003,7 @@ Avoid getting data directly with `r.FormValue("username")` and `r.FormValue("pas
 
 See `guards.go` which establishes certain rules what is allowed and disallowed with HTTP bodies inside guards (middleware) when using net/http.
 
-These issues do not appear in Python's much higher level FastAPI, but the same problem space with Starlette used by FastAPI underneath, so this is not Go and Go's net/http, but rather HTTP streaming. We are at the lower level here which has pros and cons. Verbosity and some problems upfront, but we know the system better when things go South.
+These issues do not appear in Python's higher level FastAPI, but the same problem space with Starlette used by FastAPI underneath, so this is not Go and Go's net/http, but rather HTTP streaming. We are at the lower level here which has pros and cons. Verbosity and some problems upfront, but we know the system better when things go South.
 
 ### Data Races
 
