@@ -1030,19 +1030,21 @@ If this runs inside a handler, it runs in a separate goroutine which serves each
 
 sync.Mutex is also used during PoW to prevent replay attacks (ensure lock on a single IP).
 
-Interestingly, single-threaded does not mean race-free. Two requests can interleave between awaits, so async Python has asyncio.Lock() and Node will need an external package like async-mutex to update their dict/map/list properly due to multiple coroutines with access to the same data structure.
+Interestingly, single-threaded does not mean race-free. A thread touches only one request at a time, and all the updates are sequential, but asynchrony means switching between the pieces of the request code based on the yield points (await). If a condition on max IP number is checked inside each request before hitting async and updating anything, both requests will see the same number of the IP counts, the first await will switch to the other request which will hits its own await, once those awaits complete, both will update the IP counter bypassing the limit, in sequence, one at a time.
 
-All this is "shared memory", known to be very error-prone. Resort to Redis to avoid that and "shard" properly.
+To fix these logical races (not memory races), async Python has asyncio.Lock() and Node will need an external package like async-mutex. All this is like shared memory in Go. It is thread-safe, but already with races, which is very error-prone.
 
-Go brings true parallelism within a single process: it will use all the CPU cores. We get shared memory (goroutines see the same heap), mutexes work across all goroutines. If we added multiple containers and load balancer, counting would break as the counting structures get simply duplicated. This must be solved with Redis or Postgres.
+Go brings true parallelism within a single process: it will use all the CPU cores. We get shared memory (goroutines see the same heap), mutexes work across all goroutines. If we added multiple containers and load balancer, counting would break as the counting structures get simply duplicated. This must be solved with Redis or Postgres, or smarter Go with channels and actors.
 
-Python is so between Go and Node. We get sync (WSGI) vs async (ASGI) runtimes, and it is not clear if this is a good thing. Django is WSGI classically, but also supports the ASGI now. For CPU-bound requests one can go with Flask (sync) + gunicorn workers (async), or FastAPI (async) + multiple workers (sync). There is also GIL vs non-GIL direction. GIL makes CPython thread-safe(r), but it does not allow threads to be executed in parallel. However, it yields on I/O waiting just like single-threaded async runtimes (ASGI, Node). At some point GIL will be removed, but it will require rewriting the C extensions.
+Python is so between Go and Node. We get sync (WSGI) vs async (ASGI) runtimes, and it is not clear if this is a good thing. Django is WSGI classically, but also supports the ASGI now. For CPU-bound requests one can go with Flask (sync) + gunicorn workers (async), or FastAPI (async) + multiple workers (sync). There is also GIL vs non-GIL axis. GIL makes CPython thread-safe(r), but it does not allow threads to be executed in parallel. However, it yields on I/O waiting just like single-threaded async runtimes (ASGI, Node). At some point GIL will be removed, but it will be like WSGI', one more runtime requiring different C extensions.
 
-I begin to appreciate Go even more now.
+I begin to appreciate Go even more now, but shared memory parallelism (sync.Mutex) is not a good idea. sync.Mutex needs to be removed, rate limiters must be done with Redis/Postgres. So "shared services" rather than "shared memory". This will add network and disk contention, and the "expired key" problems, but at least no manual low level syncing as this gets delegated to DB transactions.
 
 # References
 
 [Just Use Postgres for Everything](https://www.amazingcto.com/postgres-for-everything/)
+
+[Coroutines for Go](https://research.swtch.com/coro)
 
 [JUST F\*CKING USE REACT](https://justfuckingusereact.com/)
 
