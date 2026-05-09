@@ -6,6 +6,28 @@
   <img src="docs/Mikhail-Vachaev-Chernyj-Kvadrat.jpg" alt="Mikhail Vachaev's Black Square" style="width: 70%; height: auto;" />
 </p>
 
+# Update: May 9th, 2026
+
+Discontinued the service after 3 months of operation. Learned a ton, Hetzner VPS CAX11 is solid, but no users and why waste electricity.
+
+The bill was 4.59eu (February) + 4.59eu (March) + 6.04eu (April) + whatever remains from May (expecting/pending 2-3eu closing bill).
+
+A few conclusions about this code: 
+
+- Deployment automation needs to be improved, this is still too manual. Makefiles questionable, so is Docker Compose and all that.
+
+- Hetzner CAX11 VPS node gives 20x more bandwidth, is ~3x cheaper, and no need to be afraid of the DDoS bills, compared to a standard plan on Vercel. However, a VPS takes a lot of time to manage, it is absolutely no PaaS. All sorts of decisions to make about Linux, folders, ufw, ssh, password disable, backups. There are no answers, only choices.
+
+- Way too many containers already. Also unclear whether to share Postgres on a single VPS with multiple apps. Here the decision is to spin a separate Postgres server and data mount per app, but this is questionable.
+
+- This code has a lot of premature robustness/"ready-to-scale" features, and no Auth. 
+
+- Writing custom/manual in-memory IP rate limiters is not a good idea as future sharding may break parallel counts. This area is also rather tricky, better resort to something standard Redis-based.
+
+- It is essential to know what you need upfront, where your focus will be for the next months, and get paid for that, otherwise too many ways to go just about anything in this vast webdev space. The importance of constraints...
+
+- A reasonable service does not mean much as an idea. Need to market it, but even then, I do not think this was a good idea, to provide the board where anybody can post and read anything. Imagine free ebay which does not sensor chats for addresses, does not impose fees per transactions, and is easy to use. Sounds like a plan, but how to actually execute it?!
+
 # Introduction
 
 **initialsdb** is a public bulletin board (message store) implemented as Go + React + PostgreSQL. It uses proof of work and rate limiting to fight bots.
