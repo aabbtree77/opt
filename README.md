@@ -14,21 +14,21 @@ The bill was 4.59eu (February) + 4.59eu (March) + 6.04eu (April) + whatever come
 
 A few conclusions about this code: 
 
-- Deployment automation needs to be improved, this is still too manual. Makefiles questionable, so is Docker Compose and devops.
+- Deployment automation needs to be improved, this is still too manual. Makefiles questionable, so is Docker Compose.
 
-- Hetzner CAX11 VPS node gives 20x more bandwidth, is ~3x cheaper, and no need to be afraid of the DDoS bills, w.r.t. PaaS like Vercel. However, a VPS takes a lot of time to manage, no miracle savings. All sorts of decisions to make about Linux, folders, ufw, ssh, password disable, all sorts of needless details to worry about. There are no answers, only choices.
+- Hetzner CAX11 VPS node gives 20x more bandwidth, is ~3x cheaper, and no need to be afraid of the DDoS bills, w.r.t. PaaS like Vercel. However, a VPS adds friction, no miracles. Decisions to make about Linux users and folders, ufw, ssh, password disable, endless needless details.
 
-- Way too many containers already. Also unclear whether to share Postgres on a single VPS with multiple apps. Here the code spins a separate Postgres server and data mount per app, but this is questionable.
+- Too many containers. Also unclear whether to share Postgres on a single VPS with multiple apps. Here the code spins a separate Postgres server and data mount per app, but this might hog the VPS.
 
 - Postgres vs SQLite. Part of me still wants SQLite everywhere no matter what.
 
-- This code has some premature "ready-to-scale" features, but no user authentication. The idea was to fight spam bots with rate limiters.
+- Premature "ready-to-scale" features, but no user authentication. The idea was to fight spam bots with rate limiters.
 
-- Writing custom/manual in-memory IP rate limiters is not a good idea as future sharding may break parallel counts. sync.Mutex scares me. Better resort to something standard Redis-based.
+- Writing custom/manual in-memory IP rate limiters is not a good idea as future sharding may break parallel counting. sync.Mutex scares me. Better resort to something standard Redis-based.
 
-- It is essential to know what you need upfront, have razor sharp focus, otherwise too many ways to go just about anything in this vast webdev space. Engineering (and its opposite - art!) is about constraints...
+- It is essential to know what you need upfront, have razor sharp focus, otherwise too many ways to go about anything in this vast webdev space. Engineering (and its opposite - art!) is about constraints...
 
-- I doubt this was a good idea (to provide the board where anybody can post and read anything). Imagine free ebay which does not sensor chats for addresses, does not impose fees per transactions, and is easy to use. Sounds like a plan, but how to actually execute it?!
+- I doubt this was a good idea (to provide the board where anybody can post and read anything). Still, imagine free ebay which does not sensor chats for addresses, does not impose fees per transactions, and is easy to use. Sounds like a plan, but how to actually execute it?!
 
 # Introduction
 
