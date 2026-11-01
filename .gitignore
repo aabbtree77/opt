@@ -34,7 +34,7 @@ data/
 **/data/
 config/
 **/config/
-!initialsdb/src/backend
+!initialsdb/src/backend/config
 
 # --------------------------------------------------
 # Logs & temp

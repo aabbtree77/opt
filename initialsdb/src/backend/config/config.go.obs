@@ -1,0 +1,227 @@
+package config
+
+import (
+	"encoding/base64"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+)
+
+/*
+────────────────────────────────────────
+Helpers
+────────────────────────────────────────
+*/
+
+func getenvBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		panic(key + " must be true or false")
+	}
+	return b
+}
+
+func getenvInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		panic(key + " must be an integer")
+	}
+	return i
+}
+
+func getenvInt64(key string, def int64) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	i, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		panic(key + " must be an integer")
+	}
+	return i
+}
+
+func getenvString(key, def string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+/*
+────────────────────────────────────────
+Body size limiter
+────────────────────────────────────────
+*/
+
+type BodySizeLimiterConfig struct {
+	Enable   bool
+	MaxBytes int64
+}
+
+/*
+────────────────────────────────────────
+IP rate limiter
+────────────────────────────────────────
+*/
+
+type IPRateLimiterConfig struct {
+	Enable      bool
+	MaxRequests int
+	WindowMS    int
+}
+
+func (c IPRateLimiterConfig) Window() time.Duration {
+	return time.Duration(c.WindowMS) * time.Millisecond
+}
+
+/*
+────────────────────────────────────────
+Proof of Work
+────────────────────────────────────────
+*/
+
+type ProofOfWorkConfig struct {
+	Enable     bool
+	Difficulty uint8
+	TTLSeconds int64
+
+	DecodedSecretKey []byte
+}
+
+func (c ProofOfWorkConfig) TTL() time.Duration {
+	return time.Duration(c.TTLSeconds) * time.Second
+}
+
+/*
+────────────────────────────────────────
+Root config
+────────────────────────────────────────
+*/
+
+type Config struct {
+	AppEnv   string
+	LogLevel string
+
+	ServerAddr string
+
+	// Fully assembled DSN (derived, not configured)
+	DBDSN string
+
+	// Raw DB parts (12-factor style)
+	PostgresDB       string
+	PostgresUser     string
+	PostgresPassword string
+	PostgresHost     string
+	PostgresPort     string
+	PostgresSSLMode  string
+
+	ServerSalt string
+
+	ProofOfWork     ProofOfWorkConfig
+	BodySizeLimiter BodySizeLimiterConfig
+	IPRateLimiter   IPRateLimiterConfig
+}
+
+/*
+────────────────────────────────────────
+Load & validate
+────────────────────────────────────────
+*/
+
+func LoadConfig() Config {
+	cfg := Config{
+		AppEnv:   getenvString("APP_ENV", "dev"),
+		LogLevel: getenvString("LOG_LEVEL", "info"),
+
+		ServerAddr: getenvString("SERVER_ADDR", ":8080"),
+
+		// DB connection parts
+		PostgresDB:       getenvString("POSTGRES_DB", ""),
+		PostgresUser:     getenvString("POSTGRES_USER", ""),
+		PostgresPassword: getenvString("POSTGRES_PASSWORD", ""),
+		PostgresHost:     getenvString("POSTGRES_HOST", "db"),
+		PostgresPort:     getenvString("POSTGRES_PORT", "5432"),
+		PostgresSSLMode:  getenvString("POSTGRES_SSLMODE", "disable"),
+
+		ProofOfWork: ProofOfWorkConfig{
+			Enable:     getenvBool("POW_ENABLE", false),
+			Difficulty: uint8(getenvInt("POW_DIFFICULTY", 20)),
+			TTLSeconds: getenvInt64("POW_TTL_SECONDS", 30),
+		},
+
+		BodySizeLimiter: BodySizeLimiterConfig{
+			Enable:   getenvBool("BODY_LIMIT_ENABLE", false),
+			MaxBytes: getenvInt64("BODY_LIMIT_MAX_BYTES", 4096),
+		},
+
+		IPRateLimiter: IPRateLimiterConfig{
+			Enable:      getenvBool("IP_RATE_ENABLE", false),
+			MaxRequests: getenvInt("IP_RATE_MAX_REQUESTS", 10),
+			WindowMS:    getenvInt("IP_RATE_WINDOW_MS", 60000),
+		},
+	}
+
+	// --------------------------------------------------
+	// Database validation + DSN assembly
+	// --------------------------------------------------
+
+	if cfg.PostgresDB == "" || cfg.PostgresUser == "" || cfg.PostgresPassword == "" {
+		panic("POSTGRES_DB, POSTGRES_USER, and POSTGRES_PASSWORD must be set")
+	}
+
+	cfg.DBDSN = fmt.Sprintf(
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		cfg.PostgresUser,
+		cfg.PostgresPassword,
+		cfg.PostgresHost,
+		cfg.PostgresPort,
+		cfg.PostgresDB,
+		cfg.PostgresSSLMode,
+	)
+
+	// --------------------------------------------------
+	// Server salt
+	// --------------------------------------------------
+
+	salt := os.Getenv("SERVER_SALT")
+	if salt == "" {
+		panic("SERVER_SALT must be set")
+	}
+
+	decodedSalt, err := base64.StdEncoding.DecodeString(salt)
+	if err != nil || len(decodedSalt) < 32 {
+		panic("SERVER_SALT must be valid base64 (>= 32 bytes)")
+	}
+	cfg.ServerSalt = salt
+
+	// --------------------------------------------------
+	// Proof of Work secret
+	// --------------------------------------------------
+
+	if cfg.ProofOfWork.Enable {
+		powB64 := os.Getenv("POW_SECRET_KEY")
+		if powB64 == "" {
+			panic("POW_SECRET_KEY must be set when POW is enabled")
+		}
+
+		key, err := base64.StdEncoding.DecodeString(powB64)
+		if err != nil || len(key) < 32 {
+			panic("POW_SECRET_KEY must be valid base64 (>= 32 bytes)")
+		}
+
+		cfg.ProofOfWork.DecodedSecretKey = key
+	}
+
+	return cfg
+}
